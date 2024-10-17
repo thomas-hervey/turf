@@ -10,6 +10,7 @@ import type {
   Feature,
   Geometry,
   Point,
+  MultiLineString,
 } from "geojson";
 import { truncate } from "@turf/truncate";
 import { featureCollection, point, lineString } from "@turf/helpers";
@@ -36,7 +37,10 @@ const fixtures = fs.readdirSync(directories.in).map((filename) => {
 function getStartEndPoints(fixture: (typeof fixtures)[0]) {
   const geojson = fixture.geojson;
   const start = geojson.features[0] as Feature<Point>;
-  const end = geojson.features[1] as Feature<Point>;
+  const end =
+    geojson.features.length > 1
+      ? (geojson.features[1] as Feature<Point>)
+      : undefined;
   return { start, end };
 }
 
@@ -46,8 +50,21 @@ test("turf-great-circle", (t) => {
     const filename = fixture.filename;
     const { start, end } = getStartEndPoints(fixture);
 
-    const line = truncate(greatCircle(start, end));
-    const results = featureCollection<Geometry>([line, start, end]);
+    let line;
+    if (end) {
+      line = truncate(greatCircle(start, end));
+    } else {
+      // Assume this is a bearing case if there's no end point
+      line = truncate(
+        greatCircle(start, undefined, { bearing: 270, npoints: 100 })
+      );
+    }
+
+    const results = featureCollection<Geometry>([
+      line,
+      start,
+      ...(end ? [end] : []),
+    ]);
 
     if (process.env.REGEN)
       writeJsonFileSync(directories.out + filename, results);
@@ -88,7 +105,7 @@ test("turf-great-circle accepts Feature<Point> inputs", (t) => {
 test("turf-great-circle accepts Point geometry inputs", (t) => {
   const { start, end } = getStartEndPoints(fixtures[0]);
   t.doesNotThrow(
-    () => greatCircle(start.geometry, end.geometry),
+    () => greatCircle(start.geometry, end?.geometry),
     "accepts Point geometry inputs"
   );
   t.end();
@@ -97,7 +114,7 @@ test("turf-great-circle accepts Point geometry inputs", (t) => {
 test("turf-great-circle accepts Position inputs", (t) => {
   const { start, end } = getStartEndPoints(fixtures[0]);
   t.doesNotThrow(
-    () => greatCircle(start.geometry.coordinates, end.geometry.coordinates),
+    () => greatCircle(start.geometry.coordinates, end?.geometry.coordinates),
     "accepts Position inputs"
   );
   t.end();
@@ -134,6 +151,61 @@ test("turf-great-circle respects offset and npoints options", (t) => {
     (withOffset.geometry as LineString).coordinates.length,
     10,
     "respects offset and npoints options"
+  );
+  t.end();
+});
+
+test("turf-great-circle with bearing", (t) => {
+  const fixture = fixtures.find((f) => f.filename === "bearing-no-end.geojson");
+  if (!fixture) {
+    t.fail("bearing-no-end.geojson fixture not found");
+    return t.end();
+  }
+
+  const { start } = getStartEndPoints(fixture);
+  const line = truncate(
+    greatCircle(start, undefined, { bearing: 270, npoints: 100 })
+  );
+
+  t.ok(line, "creates a great circle with bearing and no end point");
+  t.equal(line.geometry.type, "MultiLineString", "returns a MultiLineString");
+  // Note: We expect 2 coordinates because it is a multi-line string and therefore there are two line arrays
+  t.equal(
+    (line.geometry as MultiLineString).coordinates.length,
+    2,
+    "has 2 coordinates"
+  );
+
+  const results = featureCollection<Geometry>([line, start]);
+
+  if (process.env.REGEN)
+    writeJsonFileSync(directories.out + "bearing-no-end.geojson", results);
+
+  const expected: MultiLineString = loadJsonFileSync(
+    directories.out + "bearing-no-end.geojson"
+  );
+  t.deepEquals(results, expected, "bearing case");
+  t.end();
+});
+
+test("turf-great-circle with end point and bearing", (t) => {
+  const { start, end } = getStartEndPoints(fixtures[0]);
+  const withEndAndBearing = greatCircle(start, end, { bearing: 90 });
+  const withEndOnly = greatCircle(start, end);
+  t.deepEquals(
+    withEndAndBearing,
+    withEndOnly,
+    "bearing is ignored when end point is provided"
+  );
+  t.end();
+});
+
+test("turf-great-circle with no end point and no bearing", (t) => {
+  const start = point([-122, 48]);
+  t.throws(
+    () => greatCircle(start),
+    /Either 'end' or 'options.bearing' must be provided/,
+    "throws an error when neither end nor bearing is provided"
   );
   t.end();
 });

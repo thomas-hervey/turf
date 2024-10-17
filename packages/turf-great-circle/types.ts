@@ -9,3 +9,5 @@ greatCircle(pt1.geometry.coordinates, pt2.geometry.coordinates);
 greatCircle(pt1, pt2, { properties: { name: "Seattle to DC" } });
 greatCircle(pt1, pt2, { npoints: 10 });
 greatCircle(pt1, pt2, { offset: 100, npoints: 10 });
+greatCircle(pt1, undefined, { bearing: 90 });
+greatCircle(pt1, undefined, { offset: 100, npoints: 10, bearing: 90 });
